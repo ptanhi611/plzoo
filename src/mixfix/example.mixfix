@@ -3,7 +3,7 @@
 ------------------------------------------------------------------------
 
 mixfix 1 _iscool
-let _iscool = fun n : int => $equals ($mod n 2) 0
+let _iscool = fun n : int => $eq ($mod n 2) 0
 6 iscool
 
 mixfix 1 a_a
@@ -11,7 +11,7 @@ let a_a = fun x :int => $cond ($less x 0) ($minus 0 x) x
 a -4 a
 
 mixfix 1 _doubled
-let _doubled = fun n : int => $times n 2
+let _doubled = fun n : int => $mul n 2
 $plus 2 (3 doubled) doubled doubled doubled
 -- should be 64
 
