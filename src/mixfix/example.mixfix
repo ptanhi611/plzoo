@@ -7,33 +7,58 @@ let _iscool = fun n : int => $eq ($mod n 2) 0
 6 iscool
 
 mixfix 1 a_a
-let a_a = fun x :int => $cond ($less x 0) ($minus 0 x) x
+let a_a = fun (x:int) => $cond ($lt x 0) ($sub 0 x) x
 a -4 a
 
 mixfix 1 _doubled
 let _doubled = fun n : int => $mul n 2
-$plus 2 (3 doubled) doubled doubled doubled
+$add 2 (3 doubled) doubled doubled doubled
 -- should be 64
 
 mixfix 1 _but_mod
 let _but_mod = fun n m : int => $mod n m
 
+-- Not supporting this --
+-- mixfix 1 ne_
+-- let ne_ = fun b : bool => $cond b false true
+-- let ne = false
+-- let ja = true
+-- ne ne ne
 
-mixfix 1 ne_
-let ne_ = fun b : bool => $cond b false true
-let ne = false
-let ja = true
-ne ne ne
+
+mixfix 3 if_then_else_
+let if_then_else_ = fun (b:bool) (a c:int) => $cond b a c
+
+mixfix right 3 _if_else_
+let _if_else_ = fun (a:int) (p:bool) (b:int) => $cond p a b
+
+(fun if:int => (if if false else (if false then 9 else 2))) 3
+-- Parsing expr
+-- [(fun if : int -> [[if;if;false;else;[if;false;then;9;else;2]]]);3]
+-- (fun if : int -> _if_else_ if false (if_then_else_ false 9 2)) 3
+-- (fun if : int -> _if_else_ if false (if_then_else_ false 9 2)) 3
+-- Error: ambiguous parse
 
 
-let succ = rec succ : int -> int is fun x : int => $plus x 1 ;;
+-- Fails:
+(fun if:int => (if if false else if false then 9 else 2)) 3
+(fun if:int => (if if false else (if false then 9 else 2))) 3
+-- Parsing expr
+-- [(fun if : int -> [[if;if;false;else;if;false;then;9;else;2]]);3]
+-- Could not parse
+
+
+
+
+
+let succ = rec succ : int -> int is fun x : int => $add x 1 ;;
 -- let f = rec f : int -> int is fun t : int => t + 1 ;;
 
 let not = fun b : bool => $cond b false true
 
 let range = rec range : int -> int -> int list is
   fun m : int => fun n : int =>
-    if ($less n m) then [int] else m :: (range ($plus m 1) n)
+    if ($less n m) then [int] else m :: (range ($add m 1) n)
 
 -- let range = rec range : int -> int -> int list is
 --   fun m : int => fun n : int =>
@@ -112,12 +137,12 @@ let not = fun b : bool => if b then false else true
 
 -- integer division
 let div = fun m : int => rec d : int -> int is
-  fun n : int => if $less n m then 0 else $plus 1 (d (n-m))
+  fun n : int => if $less n m then 0 else $add 1 (d (n-m))
 ;;
 
 -- remainder
 let mod = fun m : int => fun n : int =>
-  $minus n ($times m (div m n))
+  $sub n ($times m (div m n))
 ;;
 
 let notmultiple = fun m : int => fun n : int =>
@@ -131,10 +156,10 @@ let nth = rec nth : int list -> int -> int is
       | x::xs => if n = 0 then x else nth xs (n-1)
 ;;
 
-let nat = rec nat : int list is 1 :: (map (fun n : int => $plus n 1) nat)
+let nat = rec nat : int list is 1 :: (map (fun n : int => $add n 1) nat)
 ;;
 
-let nat2 = rec nat2 : int list is 2 :: (map (fun n : int => $plus n 1) nat2)
+let nat2 = rec nat2 : int list is 2 :: (map (fun n : int => $add n 1) nat2)
 ;;
 
 let sieve = rec sieve : int list -> int list is

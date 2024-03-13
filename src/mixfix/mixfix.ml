@@ -10,11 +10,7 @@ module Mixfix = Zoo.Main(struct
 
   let options = [("-p", Arg.Int (fun n -> print_depth := n), "set print depth")]
 
-  let initial_environment: environment = {
-    operators = Precedence.empty_graph;
-    context = [];
-    env = [];
-  }
+  let initial_environment: environment = Environment.empty
 
   let file_parser = Some (fun environ  s -> Mixer.file environ (Preparser.file Lexer.token s) )
 
@@ -33,12 +29,15 @@ module Mixfix = Zoo.Main(struct
        (* type check [e], and store it unevaluated! *)
        let ty = Type_check.type_of state.context e in
        Zoo.print_info "val %s : %s@." x (Presyntax.string_of_type ty) ;
-      {state with context = (x,ty)::state.context; env = (x, ref (Interpret.VClosure (state.env,e)))::state.env}
+      {context = (x,ty)::state.context; 
+       parser_context = Environment.add_known_token state.parser_context x;
+      env = (x, ref (Interpret.VClosure (state.env,e)))::state.env}
     | Syntax.Mixfix (prec, operator)->
        (* Ad operator x with precedence prec and expression e to environment.operators *)
-      let s = {state with operators = Precedence.add_operator state.operators prec operator } in 
-            Environment.dprintln (Precedence.string_of_graph s.operators); (*** DEBUG ***)
-            s
+      let operators = Precedence.add_operator state.parser_context.operators prec operator in
+      let s = {state with parser_context = Environment.register_operator state.parser_context (prec, operator) } in 
+          Environment.dprintln (Precedence.string_of_graph s.parser_context.operators); (*** DEBUG ***)
+        s
     | Syntax.Quit -> raise End_of_file
 end) ;;
 

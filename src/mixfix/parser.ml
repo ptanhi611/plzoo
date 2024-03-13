@@ -68,7 +68,7 @@ end = struct
     | _ -> []
 end
 
-let check_success (env:Environment.t) lst =
+let check_success lst =
   match lst with
   | [] -> Zoo.error "could not parse"
   | [r] -> r
@@ -82,52 +82,69 @@ type (_,_) parser =
   | Fail : ('a, 'b) parser
   | Empty : ('a, unit) parser
   | Kw : 'a -> ('a, unit) parser
+  | Cons: ('a, 'b) parser * ('a, 'c) parser -> ('a, 'b * 'c) parser
   | Or : ('a, 'b) parser * ('a, 'b) parser -> ('a, 'b) parser
-  | Cons : ('a, 'b) parser * ('a, 'c) parser -> ('a, 'b * 'c) parser
-  | ConsAfter : ('a, 'b) parser * ('a, unit) parser -> ('a, 'b) parser
-  | ConsBefore : ('a, unit) parser * ('a, 'b) parser -> ('a, 'b) parser
-  | App : ('a, 'b -> 'c) parser * ('a, 'b) parser -> ('a, 'c) parser
   | Map : ('b -> 'c) * ('a, 'b) parser -> ('a, 'c) parser
-  | List : ('a, 'b) parser * ('a, 'b list) parser -> ('a, 'b list) parser
   | Check : ('a, unit) parser * 'b -> ('a, 'b) parser
   | Between : ('a, 'b) parser * 'a list -> ('a, 'b list) parser
-  | Betweenp : (Presyntax.expr, 'b) parser * string list -> (Presyntax.expr, 'b list) parser
   | Lazy : ('a, 'b) parser lazy_t -> ('a, 'b) parser
   | Get : ('a, 'a) parser
-  | Fold : ('a list -> 'b list) -> ('a, 'b) parser
+  | Split : ('a, 'b list) parser -> ('a, 'b) parser
 
 (** Smart parser constructors *)
 
 let recursively build =
-  let rec self = lazy (build self) in
-  Lazy.force self
-
-let iter p =
-  recursively (fun self -> Or (Check (Empty, []), Map ((fun (a, b) -> a :: b), Cons (p, Lazy self))))
+   let rec self = lazy (build self) in
+   Lazy.force self
+ 
+let concat x xs = Map( (fun (a, b) -> List.cons a b), Cons(x, xs) )
+  
+ let iter p =
+   recursively (fun self -> Or (Check (Empty, []), Map ((fun (a, b) -> a :: b), Cons (p, Lazy self))))
+ (* TODO! Try re-implement with lazy *)
 
 let iter1 p =
-  Map ((fun (a,b) -> a :: b), Cons (p, iter p))
+   concat p (iter p)
 
-(** Check. [p <* v] Parses p and then checks if v is true. *)
+let ( @@> ) p1 p2 = Map(fst, Cons (p1, Check (p2, ())))
+
+let ( <@@ ) p1 p2 = Map(snd, Cons (Check (p1, ()), p2))
 
 (** Parse once with unit parser [p] and yield v*)
 let ( >> ) p v =
   Check (p, v)
 
-let kw k = Kw k
+(** Concat of parsers *)
+let ( @@@ ) p1 p2 =
+  Cons (p1, p2)
+
+(** Map. [f <$> p] Creates a parser that maps f over result of p *)
+let (<$>) f x_parser =
+  Map (f, x_parser)
+
+(** Between that maps to presyntax *)
+let betweenp p k =
+  let k = List.map (fun x -> Presyntax.Var x) k in
+  (Between (p, k))
+;;
 
 let rec runParser : type a b . (a, b) parser -> (a, b) t = function
 
-  | Fail -> fail
+   | Fail -> fail
 
-  | Empty -> return ()
+   | Empty -> return ()
 
+   | Get -> get
+
+   | Lazy (lazy p) ->
+   runParser p
+   
   | Kw k ->
-     let* k' = get in
-     if (k = k') then
-       return ()
-     else
-       fail
+   let* k' = runParser Get in
+   if (k = k') then
+     return ()
+   else
+     fail
 
   | Or (p, q) -> runParser p ||| runParser q
 
@@ -136,85 +153,46 @@ let rec runParser : type a b . (a, b) parser -> (a, b) t = function
      let* y = runParser q in
      return (x, y)
 
-  | ConsAfter (p, q) ->
-     let* x = runParser p in
-     let* () = runParser q in
-     return x
+   | Map (f, x) ->
+      let* x = runParser x in
+      return (f x)
 
-  | ConsBefore (p, q) ->
-     let* () = runParser p in
-     let* x = runParser q in
-     return x
+   | Check (p, v) ->
+      let* () = runParser p in
+      return v
 
-  | App (f, x) ->
-     let* f = runParser f in
-     let* x = runParser x in
-     return (f x)
+   | Between (p, []) -> assert false
+   | Between (p, [k]) ->
+      runParser (Kw k >> [])
+   | Between (p, k :: ks) ->
+      runParser @@
+      begin
+         Kw k <@@ (concat p (Between(p, ks)))
+      end
+   | Split p ->
+      let* xs = runParser p in
+      fun s -> List.map (fun x -> (x, s)) xs
 
-  | Map (f, x) ->
-     let* x = runParser x in
-     return (f x)
+let foldl f p =
+   Map(
+      (function
+         | [] -> []
+         | [x] -> [x]
+         | x :: xs -> 
+      [List.fold_left f x xs]
+      ), p
+   )
 
-  | Check (p, v) ->
-     let* () = runParser p in
-     return v
+let foldr f p =
+   Map(
+      (function 
+      | [] -> []
+      | [x] -> x
+      | x :: xs -> f xs x
+      ), p
+   )
 
-  | List (xp, xsp) ->
-     let* x = runParser xp in
-     let* xs = runParser xsp in
-     return (x :: xs)
-
-  | Between (p, []) -> assert false
-  | Between (p, [k]) ->
-     runParser (Kw k >> [])
-  | Between (p, k :: ks) ->
-     runParser @@
-       ConsBefore (Kw k, List(p, Between (p, ks)))
-
-  | Betweenp (p, ts) ->
-     let ts = List.map (fun x -> Presyntax.Var x) ts in
-     runParser @@ Between (p, ts)
-
-  | Fold f ->
-     let* p = runParser @@ iter Get in
-     returnMany @@ f p
-
-  (* | AppParser (op, args) -> *)
-  (*   let* args = runParser args in *)
-  (*   return @@ Syntax.make_app (Syntax.Var (Syntax.op_name op)) args *)
-
-  (* | AppParserLeft (op, stronger, between) -> *)
-  (*     let* head = runParser @@ stronger in *)
-  (*     let* tails = runParser @@ between in *)
-  (*     let opname = Syntax.Var (Syntax.op_name op) in *)
-  (*     return @@ List.fold_left (fun a b -> Syntax.make_app opname (a::b)) head tails *)
-
-  (* | AppParserRight (op, between, stronger) -> *)
-  (*   let* heads = runParser @@ between in *)
-  (*   let* last = runParser @@ stronger in *)
-  (*   let opname = Syntax.Var (Syntax.op_name op) in *)
-  (*   return @@ List.fold_right (fun a b -> Syntax.make_app opname (a @ [b])) heads last *)
-
-  | Get -> get
-
-  | Lazy (lazy p) ->
-     runParser p
-
-(** If b is false, fails, otherwise parses unit *)
-let check b =
-  if b then
-    return ()
-  else
-    fail
-
-(* (\* DEBUG version *\) *)
-(* let keyword k = *)
-(*   let* k' = get in *)
-(*   let* () = check ((Presyntax.Var k) = k') in *)
-(*   print_string (" + Got keyword " ^ k ^ "\n"); return () *)
-(* ;; *)
-
-(* let type_p ty context p =
+   (* let type_p ty context p =
    let* x = p in
    (try
    Type_check.check context ty x; return x
@@ -222,39 +200,6 @@ let check b =
    | _ -> fail) *)
 (* TODO To ni kul *)
 
-(** Concat of parsers *)
-let ( @@@ ) p1 p2 =
-  Cons (p1, p2)
-
-(** Concat ignore right unit *)
-let ( @@> ) p1 p2 =
-  ConsAfter (p1, p2)
-
-(** Concat ignore left unit *)
-let ( <@@ ) p1 p2 =
-  ConsBefore (p1, p2)
-
-(** "Applicative functor apllication" *)
-let (<*>) f_par x_par  =
-  App (f_par, x_par)
-
-(** Map. [f <$> p] Creates a parser that maps f over result of p *)
-let (<$>) f x_parser =
-  Map (f, x_parser)
-
-
-(** Parse once with unit parser [p] and yield v*)
-
-(* example, does not belong here. *)
-(* let factorial = *)
-(*   fix (fun self -> fun n -> if n = 0 then 1 else n * self () (n - 1)) *)
-
-let between p tokens = Between (p, tokens)
-
-(** Between that maps to presyntax *)
-let betweenp p k =
-  let k = List.map (fun x -> Presyntax.Var x) k in
-  Between (p, k)
 
 let numeral =
   let* w = get in
@@ -269,11 +214,11 @@ let if_then_else_endif p =
   | [c; t; e] -> return (Syntax.If (c, t, e))
   | _ -> fail
 
-let rec expr env e : Syntax.expr list =
+let rec expr (env:Environment.parser_context) e : Syntax.expr list =
   let open ListMonad in
   match e with
   | Presyntax.Var x ->
-     if List.mem_assoc x Environment.(env.context) then
+     if (Environment.token_present env x) then
        return @@ Syntax.Var x
      else
        fail
@@ -332,7 +277,7 @@ let rec expr env e : Syntax.expr list =
      return @@ Syntax.If (e1, e2, e3)
 
   | Presyntax.Fun (x, ht, e) -> (* IMPORTANT! Add x to env*) (* MENTION *)
-     let env = { env with context = (x, ht) :: env.context} in
+     let env = Environment.add_known_token env x in
      let* e = expr env e in
      return @@ Syntax.Fun (x, ht, e)
 
@@ -359,14 +304,16 @@ let rec expr env e : Syntax.expr list =
      return @@ Syntax.Cons (e1, e2)
 
   | Presyntax.Match (e, ht, e1, x, y, e2) ->
-     let* e = expr env e in
-     let* e1 = expr env e1 in
-     let* e2 = expr env e2 in
-     return @@ Syntax.Match (e, ht, e1, x, y, e2)
+    let* e = expr env e in
+    let* e1 = expr env e1 in
+    let env2 = Environment.add_known_token (Environment.add_known_token env y) x in
+    let* e2 = expr env2 e2 in
+    return @@ Syntax.Match (e, ht, e1, x, y, e2)
 
 and app_parser env: (Presyntax.expr, Syntax.expr) parser =
   let open ListMonad in
-  let f = function
+  let f (presyntaxl:Presyntax.expr list) = 
+   match presyntaxl with
     | [] -> fail
     | h :: args ->
        let rec map_expr = function
@@ -380,9 +327,10 @@ and app_parser env: (Presyntax.expr, Syntax.expr) parser =
        let* args = map_expr args in
        return @@ Syntax.make_app h args
   in
-  Fold f
+   Split ( Map ( f, iter1 Get )) (* TODO! Maybe Iter *)
 
-and get_parser env : (Presyntax.expr, Syntax.expr) parser =
+
+and get_parser (env:Environment.parser_context) : (Presyntax.expr, Syntax.expr) parser =
   let g = env.operators in
 
   let rec graph_parser (g: Precedence.graph): (Presyntax.expr, Syntax.expr) parser =
@@ -393,70 +341,67 @@ and get_parser env : (Presyntax.expr, Syntax.expr) parser =
             match op with
 
             | Syntax.{fx=Closed; tokens} ->
-               Map (Syntax.make_app ophead, Betweenp (Lazy self, tokens))
+               Map (Syntax.make_app ophead, betweenp (Lazy self)  tokens)
 
             | {fx=Postfix; tokens} ->
                Map ((fun (head, tails) -> List.fold_left (fun a b -> Syntax.make_app ophead (a :: b)) head tails),
-                    Cons (stronger_parser, iter1 (Betweenp (Lazy self, tokens))))
+                    Cons (stronger_parser, iter1 (betweenp (Lazy self) tokens)))
 
             | {fx=Prefix; tokens} ->
                Map ((fun (tails, head) -> List.fold_right (fun b a -> Syntax.make_app ophead (b @ [a])) tails head),
-                    Cons (iter1 (Betweenp (Lazy self, tokens)), stronger_parser))
+                    Cons (iter1 @@ betweenp (Lazy self) tokens, stronger_parser))
 
             | {fx=Infix NonAssoc; tokens} ->
-               (* AppParser( *)
-               (*     operator, *)
-               (*     Map ( *)
-               (*         (fun (a, (mid, b)) -> (a::mid @ [b])), *)
-               (*         Cons( *)
-               (*             stronger_parser, *)
-               (*             Cons( *)
-               (*                 Betweenp (Lazy self, tokens), *)
-               (*                 stronger_parser *)
-               (*               ) *)
-               (*           ) *)
-               (*       ) *)
-               (*   ) *)
-               failwith "Infix NonAssoc"
-
+               Map(
+                  (fun (a,(mid,b)) -> Syntax.make_app ophead ( a::mid @ [b])),
+                  (Cons (
+                     stronger_parser,
+                     Cons(
+                        betweenp (Lazy self) tokens,
+                        stronger_parser
+                     )
+                  ))
+               )
             | {fx=Infix LeftAssoc; tokens} ->
-               (* AppParserRight ( *)
-               (*     operator, *)
-               (*     Map( *)
-               (*         (fun (a,b) -> match b with *)
-               (*                       | [] -> [] *)
-               (*                       | head::tail -> *)
-               (*                          let head = a::head in *)
-               (*                          head::tail), *)
-               (*         Cons( *)
-               (*             stronger_parser, *)
-               (*             Iter1 (Betweenp (Lazy self, tokens)) *)
-               (*           ) *)
-               (*       ), *)
-               (*     stronger_parser *)
-               (*   ) *)
-               failwith "Infix LeftAssoc"
-
+            Map(
+               begin
+                  function
+                  | (a,[]) -> failwith "Iter1 isn't working"
+                  | (a,head::tails) -> let left = Syntax.make_app ophead (a::head) in
+                     List.fold_left (fun a b -> Syntax.make_app ophead (a::b)) left tails
+               end,
+               Cons(
+                  stronger_parser,
+                  Map(
+                     List.map (fun (a,b)->(a@[b])), 
+                     iter1 (Cons(
+                        betweenp (Lazy self) tokens,
+                        stronger_parser )
+                     )
+                  )
+               )
+            )
             | {fx=Infix RightAssoc; tokens} ->
-               (* AppParserLeft ( *)
-               (*     operator, *)
-               (*     stronger_parser, *)
-               (*     Map( *)
-               (*         (fun (mid,b) -> *)
-               (*           let rec f = function *)
-               (*             | [] -> [] *)
-               (*             | [last] -> [last @ [b]] *)
-               (*             | head::tail -> (head::(f tail)) *)
-               (*           in f mid), *)
-               (*         Cons( *)
-               (*             Iter1 (Betweenp (Lazy self, tokens)), *)
-               (*             stronger_parser *)
-               (*           ) *)
-               (*       ) *)
-               (*   ) *)
-               failwith "Infix RightAssoc"
+            Map(
+               begin
+                  function
+                  | ([], b) -> failwith "Iter1 isn't working"
+                  | (head::tails, b) -> let right = Syntax.make_app ophead (head@[b]) in
+                     List.fold_right (fun b a -> Syntax.make_app ophead (b @ [a])) tails right
+               end,
+               Cons(
+                  Map(
+                     List.map (fun (a, b)->(a::b)), 
+                     iter1 (Cons(
+                        stronger_parser,
+                        betweenp (Lazy self) tokens
+                        )
+                     )
+                  ),
+                  stronger_parser
+               )
+            )
           in
-
           match operators with
           | [] -> Fail
           | o::os -> Or (operator_parser stronger o, precedence_parser stronger os)
