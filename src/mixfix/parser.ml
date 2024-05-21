@@ -22,15 +22,13 @@ module ParserMonad :
 sig
   val return : 'a -> ('token, 'a) t
 
+  val fail : ('token, 'a) t
+
   val returnMany : 'a list -> ('token, 'a) t
 
   val ( let* ) : ('token, 'a) t -> ('a -> ('token, 'b) t) -> ('token, 'b) t
 
   val ( >>= )  : ('token, 'a) t -> ('a -> ('token, 'b) t) -> ('token, 'b) t
-
-  val empty : 'a -> ('token, 'a) t
-
-  val fail : ('token, 'a) t
 
   val get : ('token, 'token) t
 
@@ -49,9 +47,6 @@ end = struct
     List.concat_map g (x s)
 
   let ( let* ) = ( >>= )
-
-  (** Parses 'empty' token *)
-  let empty v = fun ts -> [(v, ts)]
 
   (** Fail parser directly fails. (Returns [[]]) *)
   let fail :('token, 'a) t = fun _ ->  []
@@ -117,8 +112,7 @@ let ( >> ) p v =
   Check (p, v)
 
 (** Concat of parsers *)
-let ( @@@ ) p1 p2 =
-  Cons (p1, p2)
+let ( @@@ ) p1 p2 = Cons (p1, p2)
 
 (** Map. [f <$> p] Creates a parser that maps f over result of p *)
 let (<$>) f x_parser =
