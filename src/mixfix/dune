@@ -1,6 +1,6 @@
 (executable
  (name mixfix)
- (libraries zoo menhirLib)
+ (libraries zoo)
  (promote
   (until-clean)
   (into ../..)))
