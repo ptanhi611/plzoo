@@ -18,7 +18,7 @@ let rec unwrap = function
 
 type ('token, 'a) t = 'token list -> ('a * 'token list) list
 
-module Monad :
+module ParserMonad :
 sig
   val return : 'a -> ('token, 'a) t
 
@@ -56,7 +56,7 @@ end = struct
   (** Fail parser directly fails. (Returns [[]]) *)
   let fail :('token, 'a) t = fun _ ->  []
 
-  (** Gets next *)
+  (** Gets next token from the stream *)
   let get: ('token, 'token) t = function
     | [] -> []
     | t::ts -> [(t,ts)]
@@ -76,7 +76,7 @@ let check_success lst =
      print_endline (String.concat "\n" (List.map Syntax.string_of_expr e) ) ;
      Zoo.error "ambiguous parse"
 
-open Monad
+open ParserMonad
 
 type (_,_) parser =
   | Fail : ('a, 'b) parser
@@ -100,7 +100,9 @@ let recursively build =
 let concat x xs = Map( (fun (a, b) -> List.cons a b), Cons(x, xs) )
   
  let iter p =
-   recursively (fun self -> Or (Check (Empty, []), Map ((fun (a, b) -> a :: b), Cons (p, Lazy self))))
+   recursively (fun self -> 
+      Or (Check (Empty, []), Map ((fun (a, b) -> a :: b), Cons (p, Lazy self)))
+   )
  (* TODO! Try re-implement with lazy *)
 
 let iter1 p =
@@ -192,28 +194,6 @@ let foldr f p =
       ), p
    )
 
-   (* let type_p ty context p =
-   let* x = p in
-   (try
-   Type_check.check context ty x; return x
-   with
-   | _ -> fail) *)
-(* TODO To ni kul *)
-
-
-let numeral =
-  let* w = get in
-  match w with
-  | Presyntax.Int x -> return (Syntax.Int x)
-  | _ -> fail
-
-let if_then_else_endif p =
-  let ite_parts = Presyntax.([Var "if"; Var "then"; Var "else"; Var "endif"]) in
-  let* parts = runParser @@ Between (p, ite_parts) in
-  match parts with
-  | [c; t; e] -> return (Syntax.If (c, t, e))
-  | _ -> fail
-
 let rec expr (env:Environment.parser_context) e : Syntax.expr list =
   let open ListMonad in
   match e with
@@ -276,10 +256,10 @@ let rec expr (env:Environment.parser_context) e : Syntax.expr list =
      let* e3 = expr env e3 in
      return @@ Syntax.If (e1, e2, e3)
 
-  | Presyntax.Fun (x, ht, e) -> (* IMPORTANT! Add x to env*) (* MENTION *)
-     let env = Environment.add_known_token env x in
+  | Presyntax.Fun (name, ht, e) ->
+     let env = Environment.add_identifier_token env name in
      let* e = expr env e in
-     return @@ Syntax.Fun (x, ht, e)
+     return @@ Syntax.Fun (name, ht, e)
 
   | Presyntax.Pair (e1, e2) ->
      let* e1 = expr env e1 in
@@ -306,7 +286,7 @@ let rec expr (env:Environment.parser_context) e : Syntax.expr list =
   | Presyntax.Match (e, ht, e1, x, y, e2) ->
     let* e = expr env e in
     let* e1 = expr env e1 in
-    let env2 = Environment.add_known_token (Environment.add_known_token env y) x in
+    let env2 = Environment.add_identifier_token (Environment.add_identifier_token env y) x in
     let* e2 = expr env2 e2 in
     return @@ Syntax.Match (e, ht, e1, x, y, e2)
 

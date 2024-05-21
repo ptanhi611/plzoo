@@ -29,13 +29,13 @@ type operator = {
 let op_name {fx;tokens} =
   let tokens = String.concat "_" tokens in
   match fx with
+  | Closed -> tokens
   | Prefix -> tokens ^ "_"
   | Postfix -> "_" ^ tokens
-  | Infix assoc -> "_" ^ tokens ^ "_"
-  | Closed -> tokens
+  | Infix _ -> "_" ^ tokens ^ "_"
 
 let string_of_op ({fx;tokens} as op) = 
-  (op_name op) ^ " ("^(string_of_fixity fx) ^ " fixity)"
+  (op_name op) ^ " (fx:" ^ (string_of_fixity fx) ^ ")"
 
 (** The type of variable names. *)
 type name = string
@@ -70,6 +70,7 @@ type toplevel_cmd =
   | Def of name * expr (** toplevel definition [let x = e] *)
   | Mixfix of int * operator
   | Quit
+  (* | ClearOperators *)
 
 let rec make_app head = function
   | [] -> head

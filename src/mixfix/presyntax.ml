@@ -44,7 +44,8 @@ type toplevel_cmd =
   | Expr of expr       (** an expression to be evaluated *)
   | Def of name * expr (** toplevel definition [let x = e] *)
   | Mixfix of associativity * int * string
-  | Quit               (** exit toplevel [$quit] *)
+  | Quit               (** exit toplevel [:quit] *)
+  (* | ClearOperators    (** reset built parser [:clear] *) *)
 
 (** Conversion from a type to a string *)
 let string_of_type ty =

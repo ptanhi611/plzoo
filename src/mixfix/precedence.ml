@@ -4,7 +4,7 @@ type t = int * Syntax.operator list
 type graph = t list
 
 let string_of_precedence (p, lst) =
-  Printf.sprintf "Precedence %d\n  %s" p (
+  Printf.sprintf "Precedence %d -> %s" p (
     String.concat "\n  " (List.map Syntax.string_of_op lst)
   )
 
@@ -18,6 +18,15 @@ let rec sucs (p:t) = function
 ;;
 
 let empty_graph = []
+
+(* Find the an already-defined operator that has one of its tokens in the given list. *)
+let find_duplicate_token tokens0 =
+  let token_in_list = List.find_opt (fun token -> List.exists (( = ) token) tokens0) in
+  let token_in_operator = List.find_map (fun (operator:Syntax.operator) -> 
+    Option.bind (token_in_list operator.tokens) (fun token -> Some (token, operator))
+  ) in
+  List.find_map (fun (prec, operators) -> Option.bind (token_in_operator operators) (fun (op, token) -> Some (prec, op, token)))
+;;
 
 let rec update_precedence (operator:Syntax.operator) = function
   | [] -> [(operator.fx, [operator.tokens])]

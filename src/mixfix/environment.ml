@@ -1,9 +1,9 @@
 
-module TokenSet = Set.Make(struct type t = Syntax.name let compare = compare end)
+module IdentifierSet = Set.Make(struct type t = Syntax.name let compare = Stdlib.compare end)
 
 type parser_context = {
   operators: Precedence.graph;
-  known_tokens: TokenSet.t;
+  known_identifiers: IdentifierSet.t;
 }
 
 type t = {
@@ -16,7 +16,7 @@ type t = {
 let empty = {
   parser_context = {
     operators = Precedence.empty_graph;
-    known_tokens = TokenSet.empty;
+    known_identifiers = IdentifierSet.empty;
   };
   context = [];
   env = [];
@@ -29,12 +29,12 @@ let register_operator (ctx:parser_context) (prec, op) =
   let operators = Precedence.add_operator ctx.operators prec op in
   {ctx with operators = operators}
 
-let add_known_token (ctx:parser_context) token =
-  let known_tokens = TokenSet.add token ctx.known_tokens in
-  {ctx with known_tokens = known_tokens}
+let add_identifier_token (ctx:parser_context) identifier =
+  let new_identifiers = IdentifierSet.add identifier ctx.known_identifiers in
+  {ctx with known_identifiers = new_identifiers}
 
 let token_present (ctx:parser_context) token =
-  TokenSet.mem token ctx.known_tokens
+  IdentifierSet.mem token ctx.known_identifiers
 
 let dprintln a =
   if debug then print_endline a else ()
