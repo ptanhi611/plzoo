@@ -33,7 +33,7 @@ let add_identifier_token (ctx:parser_context) identifier =
   let new_identifiers = IdentifierSet.add identifier ctx.known_identifiers in
   {ctx with known_identifiers = new_identifiers}
 
-let token_present (ctx:parser_context) token =
+let identifier_present (ctx:parser_context) token =
   IdentifierSet.mem token ctx.known_identifiers
 
 let dprintln a =

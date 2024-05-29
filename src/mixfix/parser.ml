@@ -1,19 +1,29 @@
 (* Parser combinatorji *)
 
-module ListMonad = struct
-  let return x = [ x ]
-  let ( let* ) xs f = List.concat_map f xs
-  let fail = []
-end
-
-let wrap rs ts = List.map (fun x -> (x, ts)) rs
-
-let rec unwrap = function
+(* let rec unwrap = function
   | [] -> []
   | (r, []) :: rs -> r :: unwrap rs
-  | (_, _ :: _) :: rs -> unwrap rs
+  | (_, _ :: _) :: rs -> unwrap rs *)
+module LList = struct
 
-type ('token, 'a) t = 'token list -> ('a * 'token list) list
+   let return = Seq.return
+
+   let ( >>= ) x f = Seq.concat_map f x
+
+   let ( let* ) = ( >>= )
+
+   let fail = Seq.empty
+end
+
+let rec unwrap s = 
+   match Seq.uncons s with
+      | None -> Seq.empty
+      | Some ((r, []), rs) -> Seq.cons r (unwrap rs)
+      | Some ((_, _ :: _), rs) -> unwrap rs
+
+let unwrap_finished s = Seq.filter_map (fun (p, s) -> if s = [] then Some p else None) s
+
+type ('token, 'a) t = 'token list -> ('a * 'token list) Seq.t
 
 module ParserMonad : sig
   val return : 'a -> ('token, 'a) t
@@ -24,29 +34,33 @@ module ParserMonad : sig
   val ( let* ) : ('token, 'a) t -> ('a -> ('token, 'b) t) -> ('token, 'b) t
   val ( >>= ) : ('token, 'a) t -> ('a -> ('token, 'b) t) -> ('token, 'b) t
 end = struct
-  let return x inp = [ (x, inp) ]
+  let return x = fun inp -> Seq.return (x, inp)
 
   let ( >>= ) (p : ('token, 'a) t) (f : 'a -> ('token, 'b) t) : ('token, 'b) t =
    fun inp ->
-    let g (x, rest) = (f x) rest in
-    List.concat_map g (p inp)
+         (let g (x, rest) = (f x) rest in
+            Seq.concat_map g (p inp))
 
   let ( let* ) = ( >>= )
 
   (** Fail parser directly fails. (Returns [[]]) *)
-  let fail : ('token, 'a) t = fun _ -> []
+  let fail : ('token, 'a) t = fun _ -> Seq.empty
 
   (** Gets next token from the stream *)
-  let get : ('token, 'token) t = function [] -> [] | t :: ts -> [ (t, ts) ]
+  let get : ('token, 'token) t = 
+   function 
+      | [] -> Seq.empty 
+      | t :: ts -> Seq.return (t, ts)
 
-  let ( ||| ) c1 c2 s = c1 s @ c2 s
-  let eof = function [] -> [ ((), []) ] | _ -> []
+  let ( ||| ) c1 c2 inp = Seq.append (c1 inp) (c2 inp)
+
+  let eof = function [] -> Seq.return ((), []) | _ -> Seq.empty
 end
 
 open ParserMonad
 
 let check_success lst =
-  match lst with
+  match List.of_seq lst with
   | [] -> Zoo.error "could not parse"
   | [ r ] -> r
   | _ :: _ :: _ as e ->
@@ -89,9 +103,12 @@ let ( <$> ) f x_parser = Map (f, x_parser)
 let ( >> ) p v = p >@@ Return v
 
 let list_of_pair (a, b) = a :: b
-let concat x_p xs_p = list_of_pair <$> Cons (x_p, xs_p)
-let iter p = recursively (fun self -> Or (Return [], concat p (Lazy self)))
-let iter1 p = concat p (iter p)
+
+let concat_parser x_p xs_p = list_of_pair <$> Cons (x_p, xs_p)
+
+let iter p = recursively (fun self -> Or (Return [], concat_parser p (Lazy self)))
+
+let iter1 p = concat_parser p (iter p)
 
 (** Between that maps to presyntax *)
 let betweenp p k =
@@ -106,20 +123,25 @@ let rec runParser : type a b. (a, b) parser -> (a, b) t = function
   | Sat (pred, p) ->
       let* x = runParser p in
       if pred x then return x else fail
+
   | Or (p, q) -> runParser p ||| runParser q
   | Cons (p, q) ->
       let* x = runParser p in
       let* y = runParser q in
       return (x, y)
-  | Map (f, x) ->
-      let* x = runParser x in
-      return (f x)
+
+  | Map (f, p) ->
+      let* x = runParser p in
+      return @@ f x
+   
   | Between (p, []) -> assert false
   | Between (p, [ k ]) -> runParser (kw k >> [])
-  | Between (p, k :: ks) -> runParser @@ (kw k >@@ concat p (Between (p, ks)))
+  | Between (p, k :: ks) -> runParser (kw k >@@ concat_parser p (Between (p, ks)))
+
+  
   | Split p ->
-      let* xs = runParser p in
-      fun inp -> List.map (fun x -> (x, inp)) xs
+      let* xs = (runParser p) in
+      fun inp -> List.to_seq @@ List.map (fun x -> (x, inp)) xs
 
 let foldl f p =
   Map
@@ -129,16 +151,16 @@ let foldl f p =
 
 let foldr f p = Map ((function [] -> [] | [ x ] -> x | x :: xs -> f xs x), p)
 
-let rec parse_one_presyntax (env : Environment.parser_context) e :
-    Syntax.expr list =
-  let open ListMonad in
+let rec parse_one_presyntax (env : Environment.parser_context) e =
+  let open LList in
   match e with
   | Presyntax.Var x ->
       if Environment.identifier_present env x then return @@ Syntax.Var x
       else fail
   | Presyntax.Seq es ->
       let context_parser = get_parser env in
-      unwrap @@ runParser context_parser es
+      let tt = (runParser context_parser es) in 
+      unwrap_finished tt
   | Presyntax.Int k -> return @@ Syntax.Int k
   | Presyntax.Bool b -> return @@ Syntax.Bool b
   | Presyntax.Nil ht -> return @@ Syntax.Nil ht
@@ -211,22 +233,23 @@ and app_parser env : (Presyntax.expr, Syntax.expr) parser =
   (*
     app_parser env -> Moramo narediti parser, ki sprejme Presyntax.expr in vrača Syntax.expr   
    *)
-  let open ListMonad in
-  let f (presyntaxl : Presyntax.expr list) =
+  let open LList in
+  let rec parse_arguments = function
+      | [] -> return Seq.empty (* equivalent to fail *)
+      | arg0 :: args ->
+          let* arg0 = parse_one_presyntax env arg0 in
+          let* args = parse_arguments args in
+          return @@ Seq.cons arg0 args
+    in
+  let parse_application (presyntaxl : Presyntax.expr list) =
     match presyntaxl with
     | [] -> fail
     | h :: args ->
-        let rec map_expr = function
-          | [] -> return []
-          | arg :: args ->
-              let* arg = parse_one_presyntax env arg in
-              let* args = map_expr args in
-              return (arg :: args)
-        in
         let* h = parse_one_presyntax env h in
-        let* args = map_expr args in
-        return @@ Syntax.make_app h args
+        let* args = parse_arguments args in
+        return @@ Syntax.make_app h (List.of_seq args)
   in
+  let f a = List.of_seq @@ (parse_application a) in
   Split (Map (f, iter1 Get))
 (* TODO! Maybe Iter *)
 
