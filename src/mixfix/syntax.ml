@@ -26,7 +26,7 @@ type operator = {
   fx : fixity;
 }
 
-let op_name {fx;tokens} =
+let name_of_operator {fx;tokens} =
   let tokens = String.concat "_" tokens in
   match fx with
   | Closed -> tokens
@@ -35,7 +35,7 @@ let op_name {fx;tokens} =
   | Infix _ -> "_" ^ tokens ^ "_"
 
 let string_of_op ({fx;tokens} as op) = 
-  (op_name op) ^ " (fx:" ^ (string_of_fixity fx) ^ ")"
+  (name_of_operator op) ^ " (fx:" ^ (string_of_fixity fx) ^ ")"
 
 (** The type of variable names. *)
 type name = string
@@ -72,9 +72,10 @@ type toplevel_cmd =
   | Quit
   (* | ClearOperators *)
 
-let rec make_app head = function
-  | [] -> head
-  | arg::args -> make_app (Apply (head, arg)) args 
+let rec make_app head args = 
+  match Seq.uncons args with
+  | None -> head
+  | Some (arg, tail) -> make_app (Apply (head, arg)) tail
 
 (** Conversion from an expression to a string *)
 let string_of_expr e =
