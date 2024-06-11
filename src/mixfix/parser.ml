@@ -168,11 +168,8 @@ let rec expr (env : Environment.parser_context) e =
     else fail
   | Presyntax.Seq es ->
     let context_parser = get_parser env in
-    take_unambigous
-      (
-        let* tt = runParser context_parser es in
-        return tt
-      )
+    let* tt = runParser context_parser es in
+    return @@ fst tt
   | Presyntax.Int k -> return @@ Syntax.Int k
   | Presyntax.Bool b -> return @@ Syntax.Bool b
   | Presyntax.Nil ht -> return @@ Syntax.Nil ht
@@ -355,7 +352,7 @@ and get_parser env : (Presyntax.expr, Syntax.expr) parser =
         let sucs = graph_parser ps in
         Or (precedence_parser sucs (snd p), sucs))
   in
-  graph_parser g
+  (graph_parser g) @@< Eof
 
 (*
    let string_of_parser p:(('a, 'b) t) =
