@@ -81,49 +81,11 @@ type (_, _) parser =
   | Return : 'b -> ('a, 'b) parser
   | Sequ : ('a, 'b) parser * ('a, 'c) parser -> ('a, 'b * 'c) parser
   | Or : ('a, 'b) parser * ('a, 'b) parser -> ('a, 'b) parser
-  | Map : ('b -> 'c) * ('a, 'b) parser -> ('a, 'c) parser
-  | Kw : 'a -> ('a, 'a) parser
-  | Between : ('a, 'b) parser * 'a list -> ('a, 'b Seq.t) parser
+  | MapL : ('b -> 'c Seq.t) * ('a, 'b) parser -> ('a, 'c) parser
   | Lazy : ('a, 'b) parser lazy_t -> ('a, 'b) parser
   | Get : ('a, 'a) parser
   | Eof : ('a, unit) parser (* TODO Ven? *)
-  | Split : ('a, 'b Seq.t) parser -> ('a, 'b) parser
 
-(** Smart parser constructors *)
-
-let recursively build =
-  let rec self = lazy (build (Lazy self)) in
-  Lazy.force self
-
-let kw k = Kw k
-
-(** Concatenation of parsers, returning a pair *)
-let ( @@@ ) p1 p2 = Sequ (p1, p2)
-
-(** Concatenation of parsers, discarding left *)
-let ( >@@ ) p1 p2 = Map (snd, p1 @@@ p2)
-
-(** Concatenation of parsers, discarding right *)
-let ( @@< ) p1 p2 = Map (fst, p1 @@@ p2)
-  
-(** Map. [f <$> p] Creates a parser that maps f over result of p *)
-let ( <$> ) f x_parser = Map (f, x_parser)
-
-(** Parse once with parser [p] and yield v*)
-let ( >> ) p v = p >@@ Return v
-
-let list_of_pair (a, b) = Seq.cons a b
-
-let concat_parser x_p xs_p = list_of_pair <$> Sequ (x_p, xs_p)
-
-let iter p = recursively (fun self -> Or (Return Seq.empty, concat_parser p self))
-
-let iter1 p = concat_parser p (iter p)
-
-(** Between that maps to presyntax *)
-let betweenp p k =
-  let k = List.map (fun x -> Presyntax.Var x) k in
-  Between (p, k)
 
 let rec runParser : type a b. (a, b) parser -> (a, b) t = function
   | Fail -> fail
@@ -132,31 +94,71 @@ let rec runParser : type a b. (a, b) parser -> (a, b) t = function
   | Eof -> eof
   | Lazy (lazy p) -> runParser p
 
-  | Kw k -> 
-    let* x = get in
-    if x = k then
-      return k
-    else
-      fail
-
   | Or (p, q) -> runParser p +++ runParser q
   | Sequ (p, q) ->
     let* x = runParser p in
     let* y = runParser q in
     return (x, y)
 
-  | Map (f, p) ->
+  | MapL (f, p) ->
     let* x = runParser p in
-    return @@ f x
+    let xs = f x in
+    fun inp -> (Seq.map (fun x -> (x, inp)) xs)
 
-  | Between (p, []) -> assert false
+let map f p = MapL((fun x -> Seq.return (f x) ), p)
+
+(** Map. [f <$> p] Creates a parser that maps f over result of p *)
+let ( <$> ) = map
+
+let mapo f p = MapL((fun x -> match f x with
+  | Some t -> Seq.return t
+  | None -> Seq.empty),
+  p)
+
+let kw k = mapo (fun x -> if x = k then Some x else None) Get
+
+let a k =(fun x -> if x = k then Some x else None)
+(** Smart parser constructors *)
+
+let recursively build =
+  let rec self = lazy (build (Lazy self)) in
+  Lazy.force self
+  
+(** Concatenation of parsers, returning a pair *)
+let ( @@@ ) p1 p2 = Sequ (p1, p2)
+
+(** Concatenation of parsers, discarding left *)
+let ( >@@ ) p1 p2 = snd <$> (p1 @@@ p2)
+
+(** Concatenation of parsers, discarding right *)
+let ( @@< ) p1 p2 = fst <$> (p1 @@@ p2)
+
+(** Parse once with parser [p] and yield v*)
+let ( >> ) p v = p >@@ Return v
+
+let list_of_pair (a, b) = (Seq.cons a b)
+
+let concat_parser x_p xs_p = list_of_pair <$> Sequ (x_p, xs_p)
+
+let iter p = recursively (fun self -> Or (Return Seq.empty, concat_parser p self))
+
+let iter1 p = concat_parser p (iter p)
+
+  (* | Between (p, []) -> assert false
   | Between (p, [ k ]) -> runParser (kw k >> Seq.empty)
-  | Between (p, k :: ks) -> runParser (kw k >@@ concat_parser p (Between (p, ks)))
+  | Between (p, k :: ks) -> runParser (kw k >@@ concat_parser p (Between (p, ks))) *)
 
+let between p ts =
+  let rec between p = function
+  | [] -> assert false
+  | [ k ] -> (kw k) >> Seq.empty
+  | k :: ks -> (kw k) >@@ concat_parser p (between p ks)
+in (between p ts)
 
-  | Split p ->
-    let* xs = (runParser p) in
-    fun inp -> Seq.map (fun x -> (x, inp)) xs
+(** Between that maps to presyntax *)
+let betweenp p k =
+  let k = List.map (fun x -> Presyntax.Var x) k in
+  between p k
 
 let rec expr (env : Environment.parser_context) e =
   let open LList in
@@ -260,7 +262,7 @@ and app_parser env : (Presyntax.expr, Syntax.expr) parser =
       let* args = parse_arguments tail in
       return @@ Syntax.make_app h args
   in
-  Split (Map (parse_application, iter1 Get))
+  MapL (parse_application, iter1 Get)
 (* TODO! Maybe Iter *)
 
 and get_parser env : (Presyntax.expr, Syntax.expr) parser =
@@ -276,45 +278,37 @@ and get_parser env : (Presyntax.expr, Syntax.expr) parser =
 
 
           | { fx = Closed; tokens } ->
-            Map (Syntax.make_app op_name, betweenp self tokens)
+            map (Syntax.make_app op_name) (betweenp self tokens)
 
 
           | { fx = Postfix; tokens } ->
-            Map (
-                (fun (head, tails) ->
+            map (fun (head, tails) ->
                   Seq.fold_left
                     (fun arg0 args -> Syntax.make_app op_name (Seq.cons arg0 args))
                     head tails
-                ),
-                Sequ (stronger_parser, iter1 @@ betweenp self tokens)
-              )
+                )
+                (Sequ (stronger_parser, iter1 @@ betweenp self tokens))
 
 
           | { fx = Prefix; tokens } ->
-            Map (
-              (fun (heads, tail) ->
+            map (fun (heads, tail) ->
                 seq_fold_right
                   (fun args argZ -> Syntax.make_app op_name (cons_back args argZ))
-                  heads tail),
-                Sequ (iter1 @@ betweenp self tokens, stronger_parser)
-              )
-
+                  heads tail)
+                (Sequ (iter1 @@ betweenp self tokens, stronger_parser))
+              
 
           | { fx = Infix NonAssoc; tokens } ->
-            Map
-              ( (fun (a, (mid, b)) ->
+            map (fun (a, (mid, b)) ->
                 let args = cons_back (Seq.cons a mid) b in (* [a] ++ mid ++ [b] *)
-                Syntax.make_app op_name args),
-                Sequ ( stronger_parser,
-                  Sequ (betweenp self tokens, stronger_parser) )
-              )
+                Syntax.make_app op_name args)
+                (Sequ ( stronger_parser,
+                  Sequ (betweenp self tokens, stronger_parser) ))
 
 
           | { fx = Infix LeftAssoc; tokens } ->
             (* (_A_)A_ -> First token has to be of upper parsing level.  *)
-            Map
-              (
-                (
+            map (
                   fun (a, bs) ->
                   match Seq.uncons bs with
                   | None -> failwith "Iter1 missimplementation"
@@ -323,36 +317,30 @@ and get_parser env : (Presyntax.expr, Syntax.expr) parser =
                     Seq.fold_left
                       (fun a b -> Syntax.make_app op_name (Seq.cons a b))
                       left tails
-                ),
-
-                Sequ ( stronger_parser,
-                  Map ( Seq.map (fun (a, b) -> cons_back a b),
-                    iter1 @@ Sequ (betweenp self tokens, stronger_parser)
-                  )
                 )
-              )
+
+                (Sequ (stronger_parser,
+                  map (Seq.map (fun (a, b) -> cons_back a b))
+                    (iter1 @@ Sequ (betweenp self tokens, stronger_parser)
+                  )
+                ))
 
 
           | { fx = Infix RightAssoc; tokens } ->
-            Map
-              (
-                (fun (s, b) ->
+            map (fun (s, b) ->
                   match Seq.uncons s with
                   | None -> failwith "Iter1 missimplementation"
                   | Some (head, tails) ->
                     let right = Syntax.make_app op_name (cons_back head b) in
                     seq_fold_right
                       (fun b a -> Syntax.make_app op_name (cons_back b a))
-                      tails right),
-
-                Sequ (
-                  Map (
-                    Seq.map (fun (a, b) -> Seq.cons a b),
-                    iter1 @@ Sequ (stronger_parser, betweenp self tokens)
-                  ),
+                      tails right)
+                (Sequ (
+                  map
+                    (Seq.map (fun (a, b) -> Seq.cons a b))
+                    (iter1 @@ Sequ (stronger_parser, betweenp self tokens)),
                   stronger_parser
-                )
-              )
+                ))
 
 
         in
