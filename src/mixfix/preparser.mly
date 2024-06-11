@@ -1,6 +1,7 @@
 %{
   open Presyntax
 
+  let seq_from_list = List.to_seq
   let split_to_functions (a:(name * htype) list) (e:expr) =
         List.fold_right (fun (x, ty) e -> Fun (x, ty, e)) a e
 
@@ -62,6 +63,8 @@ toplevel:
 cmd:
   | QUIT
     { Quit }
+  // | CLEAR
+  //   { ClearOperators }
 
 def:
   | LET VAR SET_EQUAL expr
@@ -107,7 +110,7 @@ expr:
 
 seq:
   | app+
-    { Seq $1 }
+    { Seq (seq_from_list $1) }
 
 app: // application
   | non_app
