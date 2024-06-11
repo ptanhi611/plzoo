@@ -1,9 +1,5 @@
 (* Parser combinatorji *)
 
-(* let rec unwrap = function
-  | [] -> []
-  | (r, []) :: rs -> r :: unwrap rs
-  | (_, _ :: _) :: rs -> unwrap rs *)
 module LList = struct
 
   let return = Seq.return
@@ -16,13 +12,14 @@ module LList = struct
 
 end
 
-let rec unwrap s = 
-  match Seq.uncons s with
-  | None -> Seq.empty
-  | Some ((r, []), rs) -> Seq.cons r (unwrap rs)
-  | Some ((_, _ :: _), rs) -> unwrap rs
+let take_unambigous = 
+  Seq.filter_map (
+    fun (p, s) -> 
+      match Seq.uncons s with
+      | None -> Some p
+      | Some _ -> None
+  )
 
-let unwrap_finished s = Seq.filter_map (fun (p, s) -> if s = [] then Some p else None) s
 let cons_back xs x = Seq.append xs (Seq.return x)
 
 let seq_fold_right f s acc = 
@@ -32,14 +29,14 @@ let seq_fold_right f s acc =
     | Some (x, xs) -> f x (aux acc xs)
   in aux acc s
 
-type ('token, 'a) t = 'token list -> ('a * 'token list) Seq.t
+type ('token, 'a) t = 'token Seq.t -> ('a * 'token Seq.t) Seq.t
 
 module ParserMonad : sig
   val return : 'a -> ('token, 'a) t
   val fail : ('token, 'a) t
   val eof : ('token, unit) t
   val get : ('token, 'token) t
-  val ( ||| ) : ('token, 'a) t -> ('token, 'a) t -> ('token, 'a) t
+  val ( +++ ) : ('token, 'a) t -> ('token, 'a) t -> ('token, 'a) t
   val ( let* ) : ('token, 'a) t -> ('a -> ('token, 'b) t) -> ('token, 'b) t
   val ( >>= ) : ('token, 'a) t -> ('a -> ('token, 'b) t) -> ('token, 'b) t
 end = struct
@@ -56,17 +53,17 @@ end = struct
   let fail : ('token, 'a) t = fun _ -> Seq.empty
 
   (** Gets next token from the stream *)
-  let get : ('token, 'token) t = 
-    function 
-    | [] -> Seq.empty 
-    | t :: ts -> Seq.return (t, ts)
+  let get : ('token, 'token) t = fun inp -> 
+    match Seq.uncons inp with 
+    | None -> Seq.empty
+    | Some (t,ts) -> Seq.return (t, ts)
 
-  let ( ||| ) c1 c2 inp = Seq.append (c1 inp) (c2 inp)
+  let ( +++ ) c1 c2 inp = Seq.append (c1 inp) (c2 inp)
 
   let eof : ('token, unit) t =
-    function 
-    | [] -> Seq.return ((), [])
-    | _ -> Seq.empty
+    fun inp -> match Seq.uncons inp with
+    | None -> (Seq.return ((), Seq.empty))
+    | Some _ -> Seq.empty
 end
 
 open ParserMonad
@@ -85,11 +82,11 @@ type (_, _) parser =
   | Sequ : ('a, 'b) parser * ('a, 'c) parser -> ('a, 'b * 'c) parser
   | Or : ('a, 'b) parser * ('a, 'b) parser -> ('a, 'b) parser
   | Map : ('b -> 'c) * ('a, 'b) parser -> ('a, 'c) parser
-  | Sat : ('a -> bool) * ('a, 'a) parser -> ('a, 'a) parser
+  | Kw : 'a -> ('a, 'a) parser
   | Between : ('a, 'b) parser * 'a list -> ('a, 'b Seq.t) parser
   | Lazy : ('a, 'b) parser lazy_t -> ('a, 'b) parser
   | Get : ('a, 'a) parser
-  | Eof : ('a, unit) parser
+  | Eof : ('a, unit) parser (* TODO Ven? *)
   | Split : ('a, 'b Seq.t) parser -> ('a, 'b) parser
 
 (** Smart parser constructors *)
@@ -98,7 +95,7 @@ let recursively build =
   let rec self = lazy (build (Lazy self)) in
   Lazy.force self
 
-let kw k = Sat (( = ) k, Get)
+let kw k = Kw k
 
 (** Concatenation of parsers, returning a pair *)
 let ( @@@ ) p1 p2 = Sequ (p1, p2)
@@ -108,11 +105,11 @@ let ( >@@ ) p1 p2 = Map (snd, p1 @@@ p2)
 
 (** Concatenation of parsers, discarding right *)
 let ( @@< ) p1 p2 = Map (fst, p1 @@@ p2)
-
+  
 (** Map. [f <$> p] Creates a parser that maps f over result of p *)
 let ( <$> ) f x_parser = Map (f, x_parser)
 
-(** Parse once with unit parser [p] and yield v*)
+(** Parse once with parser [p] and yield v*)
 let ( >> ) p v = p >@@ Return v
 
 let list_of_pair (a, b) = Seq.cons a b
@@ -134,11 +131,15 @@ let rec runParser : type a b. (a, b) parser -> (a, b) t = function
   | Get -> get
   | Eof -> eof
   | Lazy (lazy p) -> runParser p
-  | Sat (pred, p) ->
-    let* x = runParser p in
-    if pred x then return x else fail
 
-  | Or (p, q) -> runParser p ||| runParser q
+  | Kw k -> 
+    let* x = get in
+    if x = k then
+      return k
+    else
+      fail
+
+  | Or (p, q) -> runParser p +++ runParser q
   | Sequ (p, q) ->
     let* x = runParser p in
     let* y = runParser q in
@@ -165,8 +166,11 @@ let rec expr (env : Environment.parser_context) e =
     else fail
   | Presyntax.Seq es ->
     let context_parser = get_parser env in
-    let tt = (runParser context_parser es) in 
-    unwrap_finished tt
+    take_unambigous
+      (
+        let* tt = runParser context_parser es in
+        return tt
+      )
   | Presyntax.Int k -> return @@ Syntax.Int k
   | Presyntax.Bool b -> return @@ Syntax.Bool b
   | Presyntax.Nil ht -> return @@ Syntax.Nil ht
@@ -307,12 +311,13 @@ and get_parser env : (Presyntax.expr, Syntax.expr) parser =
 
 
           | { fx = Infix LeftAssoc; tokens } ->
+            (* (_A_)A_ -> First token has to be of upper parsing level.  *)
             Map
               (
                 (
                   fun (a, bs) ->
                   match Seq.uncons bs with
-                  | None -> failwith "Iter1 isn't working"
+                  | None -> failwith "Iter1 missimplementation"
                   | Some (head, tails) ->
                     let left = Syntax.make_app op_name (Seq.cons a head) in
                     Seq.fold_left
@@ -333,7 +338,7 @@ and get_parser env : (Presyntax.expr, Syntax.expr) parser =
               (
                 (fun (s, b) ->
                   match Seq.uncons s with
-                  | None -> failwith "Iter1 isn't working"
+                  | None -> failwith "Iter1 missimplementation"
                   | Some (head, tails) ->
                     let right = Syntax.make_app op_name (cons_back head b) in
                     seq_fold_right

@@ -15,7 +15,7 @@ type htype =
 (** Mixfix expressions *)
 type expr =
   | Var of name          (** variable *)
-  | Seq of expr list (** unparsed sequence *)
+  | Seq of expr Seq.t (** unparsed sequence *)
   | Int of int           (** integer constant *)
   | Bool of bool         (** boolean constant *)
   | Times of expr * expr (** product [e1 * e2] *)
@@ -69,7 +69,7 @@ let string_of_expr e =
     let (m, str) =
       match e with
         | Var v -> (100, v)
-      	| Seq exprs ->       (9, "[" ^ String.concat ";" ( List.map (to_str 8) exprs) ^ "]")
+      	| Seq exprs ->       (9, "[" ^ String.concat ";" (List.of_seq ( Seq.map (to_str 8) exprs)) ^ "]")
 	| Int n ->           (10, string_of_int n)
 	| Bool b ->          (10, string_of_bool b)
 	| Pair (e1, e2) ->   (10, "(" ^ (to_str 0 e1) ^ ", " ^ (to_str 0 e2) ^ ")")
