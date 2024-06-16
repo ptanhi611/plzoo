@@ -22,20 +22,12 @@ let toplevel_cmd (env:Environment.t) (cmd: Presyntax.toplevel_cmd): Syntax.tople
   match cmd with
 
   | Presyntax.Expr e ->
-      Environment.dprintln "Parsing expr";
-      Environment.dprintln (Presyntax.string_of_expr e);
-     let e = Parser.(check_success @@ expr env.parser_context e) in
-      Environment.dprintln "Parsed expr";
-      Environment.dprintln (Syntax.string_of_expr e);
-     Syntax.Expr e
+    let e = Parser.(check_success @@ expr env.parser_context e) in
+    Syntax.Expr e
 
   | Presyntax.Def (name,  e) ->
-      Environment.dprintln "Parsing expr";
-      Environment.dprintln (Presyntax.string_of_expr e);
-     let e = Parser.(check_success @@ expr env.parser_context e) in
-      Environment.dprintln "Parsed expr";
-      Environment.dprintln (Syntax.string_of_expr e);
-     Syntax.Def (name, e)
+    let e = Parser.(check_success @@ expr env.parser_context e) in
+    Syntax.Def (name, e)
 
   | Presyntax.Mixfix (assoc, prec, name) ->
      Syntax.Mixfix (prec, create_operator assoc name)
