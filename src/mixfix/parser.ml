@@ -256,15 +256,12 @@ and app_parser env : (Presyntax.expr, Syntax.expr) t =
 
 and get_env_parser env :
   (Presyntax.expr, Syntax.expr) t =
-  let g = env.operators in
-  let rec graph_parser (g : Precedence.graph) :
-    (Presyntax.expr, Syntax.expr) t =
-    recursively (fun self ->
+  let rec graph_parser (g : Precedence.graph) inp =
       let rec precedence_parser stronger operators =
         let operator_parser stronger_parser op =
           let op_name = Syntax.Var (Syntax.name_of_operator op) in
           let make_operator_app = Syntax.make_app op_name in
-          let between_parser = between (self) @@
+          let between_parser = between (graph_parser g) @@
             List.map (fun x -> Presyntax.Var x) op.tokens in
           match op with
 
@@ -334,13 +331,12 @@ and get_env_parser env :
         | o :: os -> (operator_parser stronger o) ++ (precedence_parser stronger os)
       in
       match g with
-      | [] -> app_parser env
+      | [] -> app_parser env inp
       | p :: ps ->
         let sucs = graph_parser ps in
-        (precedence_parser sucs (snd p)) ++ sucs
-      )
+        (precedence_parser sucs (snd p)) ++ sucs @@ inp
   in
-  (graph_parser g) @@< eof
+  (graph_parser env.operators) @@< eof
 
   (* let t = graph_parser g @@< Eof
 in string_of_parser t |> print_endline; t *)
