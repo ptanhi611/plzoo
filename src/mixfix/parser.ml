@@ -13,7 +13,7 @@ module ListMonad = struct
 end
 
 module ParserMonad : sig
-  type ('token, 'a) t = ('token Seq.t -> ('a * 'token Seq.t) Seq.t) Lazy.t
+  type ('token, 'a) t = 'token Seq.t -> ('a * 'token Seq.t) Seq.t
 
   val return : 'a -> ('token, 'a) t
   val fail : ('token, 'a) t
@@ -23,31 +23,31 @@ module ParserMonad : sig
   val ( let* ) : ('token, 'a) t -> ('a -> ('token, 'b) t) -> ('token, 'b) t
   val ( >>= ) : ('token, 'a) t -> ('a -> ('token, 'b) t) -> ('token, 'b) t
 end = struct
-  type ('token, 'a) t = ('token Seq.t -> ('a * 'token Seq.t) Seq.t) Lazy.t
+  type ('token, 'a) t = 'token Seq.t -> ('a * 'token Seq.t) Seq.t
 
-  let return x = lazy (fun inp -> Seq.return (x, inp))
+  let return x inp = Seq.return (x, inp)
 
   let ( >>= ) (p : ('token, 'a) t) (f : 'a -> ('token, 'b) t) : ('token, 'b) t =
-    lazy (fun inp ->
-      Seq.flat_map (fun (x, inp) -> Lazy.force (f x) inp) (Lazy.force p inp))
+    fun inp ->
+      Seq.flat_map (fun (x, inp) -> f x inp) (p inp)
 
   let ( let* ) = ( >>= )
 
   (** Fail parser directly fails. (Returns [[]]) *)
-  let fail : ('token, 'a) t = lazy (fun _ -> Seq.empty)
+  let fail = fun _ -> Seq.empty
 
   (** Gets next token from the stream *)
-  let get : ('token, 'token) t = lazy (fun inp -> 
-    match Seq.uncons inp with 
+  let get inp =
+    match Seq.uncons inp with
     | None -> Seq.empty
-    | Some (t,ts) -> Seq.return (t, ts))
-    
-      let eof : ('token, unit) t =
-        lazy (fun inp -> match Seq.uncons inp with
-        | None -> (Seq.return ((), Seq.empty))
-        | Some _ -> Seq.empty)
+    | Some (t,ts) -> Seq.return (t, ts)
 
-  let ( ++ ) c1 c2 = lazy (fun inp -> Seq.append (Lazy.force c1 inp) (Lazy.force c2 inp))
+   let eof inp =
+     match Seq.uncons inp with
+     | None -> (Seq.return ((), Seq.empty))
+     | Some _ -> Seq.empty
+
+  let ( ++ ) c1 c2 inp = Seq.append (c1 inp) (c2 inp)
 end
 
 open ParserMonad
@@ -58,41 +58,41 @@ let check_success lst =
   | Some (a,tail) -> a
 
 let first (p:('a,'b) t) =
-  fun inp -> match Seq.uncons (Lazy.force p inp) with
+  fun inp -> match Seq.uncons (p inp) with
     | None -> Seq.empty
     | Some(a, _) -> Seq.return a
-  
-let return_many xs = lazy (fun inp -> Seq.map (fun x -> (x, inp)) xs)
+
+let return_many xs inp = Seq.map (fun x -> (x, inp)) xs
 
 (** Flat Map. [f p] Creates a parser that maps f over result of p and returns all the individual results. *)
-let flat_map f p = 
+let flat_map f p =
   let* x = p in
   return_many @@ f x
 
 (** Recursively. [recursively f] Creates a parser that can refer to itself. *)
 let recursively build =
-  let rec (self:('a,'b) t) = lazy (build (self)) in
+  let rec self x = build self x in
   self
 
 (** Map. [map f p] Creates a parser that maps f over result of p *)
 let map f p = flat_map (fun x -> Seq.return (f x)) p
 
 (** Map_opt. [map_opt f p] Creates a parser that maps f over result of p, but only if f is not None *)
-let map_opt f p = flat_map 
+let map_opt f p = flat_map
   (fun x -> match f x with
   | Some t -> Seq.return t
   | None -> Seq.empty) p
 
-let kw k = 
+let kw k =
   let* v = get in
-  if v == k then return v 
+  if v == k then return v
   else fail
 
 (** Option to choose from either parse result of [p1] pr [p2] *)
 let ( || ) p1 p2 = p1 ++ p2 ;;
 
 (** Concatenation of parsers, returning a pair *)
-let ( @@@ ) p1 p2 = 
+let ( @@@ ) p1 p2 =
   let* x = p1 in
   let* y = p2 in
   return (x,y)
@@ -100,14 +100,14 @@ let ( @@@ ) p1 p2 =
 let sequ a b = a @@@ b  (* TODO! To gre VEN*)
 
 (** Concatenation of parsers, discarding left *)
-let ( <@@ ) p1 p2 = 
+let ( <@@ ) p1 p2 =
   let* _ = p1 in
   let* x = p2 in
   return x
 
 (** Concatenation of parsers, discarding right *)
 let ( @@< ) p1 p2 =
-  let* x = p1 in 
+  let* x = p1 in
   let* _ = p2 in
   return x
 
@@ -123,8 +123,8 @@ let rec iter p = (
 ) ++ (return @@ Seq.empty)
 
 (** Kleene plus *)
-let iter1 p = 
-  let* x = p in 
+let iter1 p =
+  let* x = p in
   let* xs = iter p in
   return @@ Seq.cons x xs
 
@@ -141,8 +141,8 @@ in (between p)
 (* Auxiliary functions *)
 let cons_back xs x = Seq.append xs (Seq.return x)
 
-let seq_fold_right f s acc = 
-  let rec aux acc s = 
+let seq_fold_right f s acc =
+  let rec aux acc s =
     match Seq.uncons s with
     | None -> acc
     | Some (x, xs) -> f x (aux acc xs)
@@ -154,7 +154,7 @@ let rec expr (env : Environment.parser_context) e =
   let open ListMonad in
   match e with
   | Presyntax.Var x ->
-    if Environment.identifier_present env x then 
+    if Environment.identifier_present env x then
       Seq.return @@ Syntax.Var x
     else
       Seq.empty
@@ -162,7 +162,7 @@ let rec expr (env : Environment.parser_context) e =
     Seq.iter (fun e -> print_string (Presyntax.string_of_expr e ^ " ")) es;
     print_newline ();
     let context_parser = get_env_parser env in
-    let* tt = (Lazy.force context_parser) es in
+    let* tt = context_parser es in
     return @@ fst tt
   | Presyntax.Int k -> return @@ Syntax.Int k
   | Presyntax.Bool b -> return @@ Syntax.Bool b
@@ -234,7 +234,7 @@ let rec expr (env : Environment.parser_context) e =
 
 and app_parser env : (Presyntax.expr, Syntax.expr) t =
   let open ListMonad in
-  let rec parse_arguments args = 
+  let rec parse_arguments args =
     match Seq.uncons args with
     | None -> return Seq.empty (* equivalent to fail *)
     | Some (arg0 ,args) ->
@@ -264,7 +264,7 @@ and get_env_parser env :
         let operator_parser stronger_parser op =
           let op_name = Syntax.Var (Syntax.name_of_operator op) in
           let make_operator_app = Syntax.make_app op_name in
-          let between_parser = between (self) @@ 
+          let between_parser = between (self) @@
             List.map (fun x -> Presyntax.Var x) op.tokens in
           match op with
 
@@ -296,7 +296,7 @@ and get_env_parser env :
 
           | { fx = Infix LeftAssoc; _ } ->
             (* (_A_)A_ -> First token has to be of upper parsing level.  *)
-            map 
+            map
               (fun (a, bs) ->
                 match Seq.uncons bs with
                 | None -> failwith "Iter1 missimplementation"
@@ -324,7 +324,7 @@ and get_env_parser env :
                     (fun b a -> make_operator_app @@ cons_back b a)
                     tails right)
               (sequ
-                (map 
+                (map
                   (Seq.map (fun (a, b) -> Seq.cons a b))
                   (iter1 (sequ stronger_parser between_parser)))
                 stronger_parser)
@@ -334,10 +334,10 @@ and get_env_parser env :
         | o :: os -> (operator_parser stronger o) ++ (precedence_parser stronger os)
       in
       match g with
-      | [] -> Lazy.force @@ app_parser env
+      | [] -> app_parser env
       | p :: ps ->
         let sucs = graph_parser ps in
-        Lazy.force @@ (precedence_parser sucs (snd p)) ++ sucs
+        (precedence_parser sucs (snd p)) ++ sucs
       )
   in
   (graph_parser g) @@< eof
