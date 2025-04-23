@@ -116,6 +116,12 @@ let sub = function
   | (MInt x) :: (MInt y) :: s -> MInt (y - x) :: s
   | _ -> error "int and int expected in sub"
 
+(** Division *)
+let div = function
+  | 
+  |
+  |
+  
 (** Equality *)
 let equal = function
   | (MInt x) :: (MInt y) :: s -> MBool (y = x) :: s

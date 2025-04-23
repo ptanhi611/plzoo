@@ -28,6 +28,7 @@ rule token = parse
   | '+'             { PLUS }
   | '-'             { MINUS }
   | '*'             { TIMES }
+  | '/'             { DIVIDE }
   | var             { VAR (Lexing.lexeme lexbuf) }
   | eof             { EOF }
 

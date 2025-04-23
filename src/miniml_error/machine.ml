@@ -115,14 +115,14 @@ let pop_app = function
 
 (** Multiplication *)
 let mult = function
-    (MInt x) :: (MInt y) :: s -> MInt (y * x) :: s
+  |  (MInt x) :: (MInt y) :: s -> MInt (y * x) :: s
   | _ -> error "int and int expected in mult"
 
 (** Division *)
 let quot = function
   | (MInt 0) :: (MInt _) :: s -> MError :: s
   | (MInt x) :: (MInt y) :: s -> MInt (y / x) :: s
-  | _ -> error "int and int expected in mult"
+  | _ -> error "int and int expected in quot"
 
 (** Addition *)
 let add = function
