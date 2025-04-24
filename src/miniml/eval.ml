@@ -9,7 +9,7 @@ open Syntax
 
 (** [is_value e] returns true, if program [e] is a value. *)
 let is_value = function
-  | Int _ | Bool _ | Fun _ -> true
+  | Int _ | Bool _ | Fun _ | Abort -> true 
   | Var _ | Times _ | Plus _ | Minus _
   | Equal _ | Less _ | If _ | Apply _ -> false
 
@@ -24,6 +24,11 @@ exception Runtime
 let rec eval1 = function
   | Var _ -> raise Runtime
   | Int _ | Bool _ | Fun _ -> raise Value
+  | Division (Int k1, Int k2) -> Int (k1 / k2)
+  | Division (Int k1, Abort)  -> Abort
+  | Division (Int k1, e2)  -> Division (Int k1, eval1 e2)
+  | Division (Abort, e2)   -> Abort
+  | Division (e1, e2)      -> Division (eval1 e1, e2)
   | Times (Int k1, Int k2) -> Int (k1 * k2)
   | Times (Int k1, e2)     -> Times (Int k1, eval1 e2)
   | Times (e1, e2)         -> Times (eval1 e1, e2)

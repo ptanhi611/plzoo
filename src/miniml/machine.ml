@@ -30,6 +30,8 @@ type mvalue =
   | MInt of int                        (** Integer *)
   | MBool of bool                      (** Boolean value *)
   | MClosure of name * frame * environ (** Closure *)
+  | MError
+  | MDivisionByZero
 
 (**
    There are two kinds of machine instructions.
@@ -43,7 +45,9 @@ type mvalue =
 *)
 
 and instr =
-  | IMult                           (** multiplication *)
+  | IErr    
+  | IMult  
+  | IDiv                     (** multiplication *)
   | IAdd                            (** addition *)
   | ISub                            (** subtraction *)
   | IEqual                          (** equality *)
@@ -75,7 +79,9 @@ let error msg = raise (Machine_error msg)
 let string_of_mvalue = function
   | MInt k -> string_of_int k
   | MBool b -> string_of_bool b
-  | MClosure _ -> "<fun>" (** Closures cannot be reasonably displayed *)
+  | MClosure _ -> "<fun>" (* Closures cannot be reasonably displayed *)
+  | MError -> "error"
+  | MDivisionByZero -> "division by zero error"
 
 (** [lookup x envs] scans through the list of environments [envs] and
     returns the first value of variable [x] found. *)
@@ -101,6 +107,12 @@ let pop_app = function
 (** Arithmetical operations take their arguments from a stack and put the
     result onto the stack. We use auxiliary functions that do this. *)
 
+    (** Division *)
+let quot = function  
+| (MInt 0) :: (MInt _) :: s -> MDivisionByZero :: s
+| (MInt x) :: (MInt y) :: s -> MInt (y / x) :: s
+| _ -> error "int and int expected in div"
+
 (** Multiplication *)
 let mult = function
   | (MInt x) :: (MInt y) :: s -> MInt (y * x) :: s
@@ -115,12 +127,6 @@ let add = function
 let sub = function
   | (MInt x) :: (MInt y) :: s -> MInt (y - x) :: s
   | _ -> error "int and int expected in sub"
-
-(** Division *)
-let div = function
-  | 
-  |
-  |
   
 (** Equality *)
 let equal = function
@@ -138,8 +144,10 @@ let less = function
     environments. The return value is a new state. *)
 let exec instr frms stck envs =
   match instr with
+    | IErr -> ([], [MError], [])
     (* Arithmetic *)
     | IMult  -> (frms, mult stck, envs)
+    | IDiv   -> (frms, quot stck, envs)
     | IAdd   -> (frms, add stck, envs)
     | ISub   -> (frms, sub stck, envs)
     | IEqual -> (frms, equal stck, envs)

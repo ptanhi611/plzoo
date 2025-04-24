@@ -14,6 +14,7 @@
 %token DIVIDE
 %token EQUAL LESS
 %token IF THEN ELSE
+%token TRY WITH 
 %token FUN IS
 %token COLON
 %token LPAREN RPAREN
@@ -31,7 +32,7 @@
 %nonassoc ELSE
 %nonassoc EQUAL LESS
 %left PLUS MINUS
-%left TIMES
+%left TIMES DIVIDE
 %right TARROW
 
 %%
@@ -71,13 +72,15 @@ plain_expr:
   | e1 = expr TIMES e2 = expr
     { Times (e1, e2) }
   | e1 = expr DIVIDE e2 = expr
-    { Divide (e1, e2)}
+    { Division (e1, e2) }
   | e1 = expr EQUAL e2 = expr
     { Equal (e1, e2) }
   | e1 = expr LESS e2 = expr
     { Less (e1, e2) }
   | IF e1 = expr THEN e2 = expr ELSE e3 = expr
     { If (e1, e2, e3) }
+  | TRY e1 = expr WITH e2 = expr RAISE e3 = expr
+    { Try (e1, e2, e3) } 
   | FUN x = VAR LPAREN f = VAR COLON t1 = ty RPAREN COLON t2 = ty IS e = expr
     { Fun (x, f, t1, t2, e) }
 
