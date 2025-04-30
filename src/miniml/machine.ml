@@ -24,14 +24,15 @@
 (** The datatype of variable names. A more efficient implementation
     would use de Bruijn indices but we want to keep things simple. *)
 type name = Syntax.name
+type exception_name = Syntax.exception_name 
+
 
 (** Machine values. *)
 type mvalue =
   | MInt of int                        (** Integer *)
   | MBool of bool                      (** Boolean value *)
   | MClosure of name * frame * environ (** Closure *)
-  | MError
-  | MDivisionByZero
+  | MException of exception_name
 
 (**
    There are two kinds of machine instructions.
@@ -46,8 +47,8 @@ type mvalue =
 
 and instr =
   | IErr    
-  | IMult  
-  | IDiv                     (** multiplication *)
+  | IMult                           (** multiplication *)
+  | IDiv                            (** Division*)
   | IAdd                            (** addition *)
   | ISub                            (** subtraction *)
   | IEqual                          (** equality *)
@@ -59,6 +60,7 @@ and instr =
   | IBranch of frame * frame        (** branch *)
   | ICall                           (** execute a closure *)
   | IPopEnv                         (** pop environment *)
+  | IHandle of exception_name * frame  
 
 (** A frame is a list (stack) of instructions *)
 and frame = instr list
@@ -80,8 +82,9 @@ let string_of_mvalue = function
   | MInt k -> string_of_int k
   | MBool b -> string_of_bool b
   | MClosure _ -> "<fun>" (* Closures cannot be reasonably displayed *)
-  | MError -> "error"
-  | MDivisionByZero -> "division by zero error"
+  | MException msg -> match msg with 
+    | DivisionByZero -> "cant divide by zero"
+    | GenericException -> "generic exception"
 
 (** [lookup x envs] scans through the list of environments [envs] and
     returns the first value of variable [x] found. *)
@@ -109,7 +112,7 @@ let pop_app = function
 
     (** Division *)
 let quot = function  
-| (MInt 0) :: (MInt _) :: s -> MDivisionByZero :: s
+| (MInt 0) :: (MInt _) :: s -> MException DivisionByZero :: s
 | (MInt x) :: (MInt y) :: s -> MInt (y / x) :: s
 | _ -> error "int and int expected in div"
 
@@ -144,7 +147,7 @@ let less = function
     environments. The return value is a new state. *)
 let exec instr frms stck envs =
   match instr with
-    | IErr -> ([], [MError], [])
+    | IErr -> ([], [MException GenericException ], [])
     (* Arithmetic *)
     | IMult  -> (frms, mult stck, envs)
     | IDiv   -> (frms, quot stck, envs)
@@ -157,22 +160,28 @@ let exec instr frms stck envs =
     | IInt k  -> (frms, (MInt k) :: stck, envs)
     | IBool b -> (frms, (MBool b) :: stck, envs)
     | IClosure (f, x, frm) ->
-	(match envs with
-	     env :: _ ->
-	       let rec c = MClosure (x, frm, (f,c) :: env) in
-		 (frms, c :: stck, envs)
-	   | [] -> error "no environment for a closure")
+                  (match envs with
+                      env :: _ ->
+                        let rec c = MClosure (x, frm, (f,c) :: env) in
+                    (frms, c :: stck, envs)
+                    | [] -> error "no environment for a closure")
     (* Control instructions *)
     | IBranch (f1, f2) ->
-	let (b, stck') = pop_bool stck in
-	  ((if b then f1 else f2) :: frms, stck', envs)
+                let (b, stck') = pop_bool stck in
+                  ((if b then f1 else f2) :: frms, stck', envs)
     | ICall ->
-	let (x, frm, env, v, stck') = pop_app stck in
-	  (frm :: frms, stck', ((x,v) :: env) :: envs)
+              let (x, frm, env, v, stck') = pop_app stck in
+                (frm :: frms, stck', ((x,v) :: env) :: envs)
     | IPopEnv ->
-	(match envs with
-	     [] -> error "no environment to pop"
-	   | _ :: envs' -> (frms, stck, envs'))
+                (match envs with
+                    [] -> error "no environment to pop"
+                  | _ :: envs' -> (frms, stck, envs'))
+    | IHandle (exn, exp) ->
+      let (v, stck') = pop stck in
+      (match v with
+       | MException v -> if v = exn then (exp :: frms, stck', envs) else
+          (frms, stck, envs)
+       | _ -> (frms, stck, envs))
 
 (** [run frm env] executes the frame [frm] in environment [env]. *)
 let run frm env =

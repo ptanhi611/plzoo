@@ -31,6 +31,11 @@ rule token = parse
   | '-'             { MINUS }
   | '*'             { TIMES }
   | '/'             { DIVIDE }
+  | "DivisionByZero"      { DIVBYZERO }
+  | "GenericException"    { GENEXN }
+  | '|'             { BAR }
+  | '{'             { LBRAC }
+  | '}'             { RBRAC}
   | var             { VAR (Lexing.lexeme lexbuf) }
   | eof             { EOF }
 

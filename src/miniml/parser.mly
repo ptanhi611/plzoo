@@ -21,6 +21,11 @@
 %token LET
 %token SEMISEMI
 %token EOF
+%token BAR
+%token GENEXN
+%token DIVBYZERO
+%token LBRAC
+%token RBRAC
 
 %start file
 %type <Syntax.command list> file
@@ -79,8 +84,10 @@ plain_expr:
     { Less (e1, e2) }
   | IF e1 = expr THEN e2 = expr ELSE e3 = expr
     { If (e1, e2, e3) }
-  | TRY e1 = expr WITH e2 = expr RAISE e3 = expr
-    { Try (e1, e2, e3) } 
+  | TRY LBRAC e1 = expr RBRAC  WITH  LBRAC BAR ex = exception_name TARROW e2 = expr RBRAC
+    { Try (e1, ex, e2) } 
+  // | RAISE e = expr
+  //   { Raise e }
   | FUN x = VAR LPAREN f = VAR COLON t1 = ty RPAREN COLON t2 = ty IS e = expr
     { Fun (x, f, t1, t2, e) }
 
@@ -113,6 +120,14 @@ ty:
     { TArrow (t1, t2) }
   | LPAREN t = ty RPAREN
     { t }
+
+
+exception_name:
+  | DIVBYZERO
+    { DivisionByZero }
+  | GENEXN 
+    { GenericException }
+
 
 mark_position(X):
   x = X

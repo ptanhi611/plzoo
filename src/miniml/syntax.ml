@@ -9,8 +9,19 @@ type ty =
   | TBool             (* Booleans *)
   | TArrow of ty * ty (* Functions *)
 
+
+
+(*new type definations for exception name*)
+type exception_name = 
+  | DivisionByZero 
+  | GenericException 
+
+
 (* Expressions *)
 type expr = expr' Zoo.located
+
+
+
 and expr' =
   | Var of name          		(* Variable *)
   | Int of int           		(* Non-negative integer constant *)
@@ -22,7 +33,7 @@ and expr' =
   | Equal of expr * expr 		(* Integer comparison [e1 = e2] *)
   | Less of expr * expr  		(* Integer comparison [e1 < e2] *)
   | If of expr * expr * expr 		(* Conditional [if e1 then e2 else e3] *)
-  | Try of expr * expr          (* try with raise block *)
+  | Try of expr * exception_name * expr          (* try with raise block *)
   | Fun of name * name * ty * ty * expr (* Function [fun f(x:s):t is e] *)
   | Apply of expr * expr 		(* Application [e1 e2] *)
   | Abort                   (* For Error Handling *)
